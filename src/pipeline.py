@@ -92,11 +92,12 @@ def parse_chunk(df: pd.DataFrame, instrument_id: InstrumentId) -> list[QuoteTick
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def run():
+    import shutil
+
     if not RAW_CSV.exists():
         raise FileNotFoundError(f"CSV not found: {RAW_CSV}\nRun Tickstory first.")
 
     # wipe catalog to avoid non-disjoint interval errors on re-run
-    import shutil
     if CATALOG.exists():
         shutil.rmtree(CATALOG)
     CATALOG.mkdir(parents=True, exist_ok=True)
@@ -106,17 +107,33 @@ def run():
     catalog.write_data([instrument])
     print(f"Instrument written: {instrument.id}")
 
-    # collect all ticks across chunks, sort by timestamp, write once
-    all_ticks = []
+    # Read all CSV into DataFrame, sort, then write monthly to catalog.
+    # Monthly write = no overlap at chunk boundaries, low RAM peak per batch.
+    print("Reading CSV...")
     reader = pd.read_csv(RAW_CSV, chunksize=CHUNK_SZ, dtype={"Date": str})
+    chunks = []
     for i, chunk in enumerate(reader):
-        ticks = parse_chunk(chunk, instrument.id)
-        all_ticks.extend(ticks)
-        print(f"Chunk {i+1}: {len(ticks):,} ticks  (running: {len(all_ticks):,})")
+        dt = pd.to_datetime(
+            chunk["Date"].astype(str) + " " + chunk["Timestamp"],
+            format="%Y%m%d %H:%M:%S",
+        ).dt.tz_localize("UTC")
+        chunk.index = dt
+        chunks.append(chunk)
+        print(f"  Chunk {i+1} read: {len(chunk):,} rows")
 
-    all_ticks.sort(key=lambda t: t.ts_event)
-    catalog.write_data(all_ticks)
-    print(f"\nDone. {len(all_ticks):,} ticks in catalog -> {CATALOG}")
+    df = pd.concat(chunks).sort_index()
+    print(f"Total rows: {len(df):,}  Range: {df.index[0]} -> {df.index[-1]}")
+
+    # write month by month — each month is sorted and non-overlapping
+    total = 0
+    for period, month_df in df.groupby(df.index.to_period("M")):
+        ticks = parse_chunk(month_df, instrument.id)
+        if ticks:
+            catalog.write_data(ticks)
+            total += len(ticks)
+        print(f"  {period}: {len(ticks):,} ticks written (total: {total:,})")
+
+    print(f"\nDone. {total:,} ticks in catalog -> {CATALOG}")
 
 
 def build_m5(csv_path: Path = RAW_CSV) -> None:

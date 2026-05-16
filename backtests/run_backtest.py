@@ -70,16 +70,33 @@ def run_single(config: ORBConfig, label: str = "default") -> dict:
 
     engine.run()
 
-    account = engine.trader.generate_account_report(Venue("DUKASCOPY"))
-    trades  = engine.trader.generate_order_fills_report()
+    # ── Estrai PnL per posizione chiusa ──────────────────────────────────
+    pos_report = engine.trader.generate_positions_report()
 
-    # ── Metriche chiave ───────────────────────────────────────────────────
-    pnls = trades["realized_pnl"].astype(float).dropna().tolist()
-    net_profit   = sum(pnls)
-    n_trades     = len(pnls)
-    win_rate     = sum(1 for p in pnls if p > 0) / n_trades if n_trades else 0
-    avg_trade    = net_profit / n_trades if n_trades else 0
-    max_dd       = _max_drawdown(pnls)
+    if pos_report.empty:
+        print("WARN: nessuna posizione nel report")
+        engine.dispose()
+        return {}
+
+    # realized_pnl può essere stringa "100.50 USD" oppure Money object
+    def parse_pnl(v) -> float:
+        s = str(v)
+        return float(s.split()[0]) if " " in s else float(s)
+
+    # filtra solo posizioni chiuse (ts_closed non null)
+    closed = pos_report[pos_report["ts_closed"].notna()].copy()
+    pnls   = closed["realized_pnl"].apply(parse_pnl).tolist()
+
+    if not pnls:
+        print("WARN: nessuna posizione chiusa")
+        engine.dispose()
+        return {}
+
+    net_profit = sum(pnls)
+    n_trades   = len(pnls)
+    win_rate   = sum(1 for p in pnls if p > 0) / n_trades
+    avg_trade  = net_profit / n_trades
+    max_dd     = _max_drawdown(pnls)
 
     results = {
         "label":       label,
@@ -91,7 +108,10 @@ def run_single(config: ORBConfig, label: str = "default") -> dict:
     }
     print(results)
 
-    trades.to_csv(RESULTS_DIR / f"trades_{label}.csv", index=False)
+    # salva trades CSV per montecarlo.py (colonna realized_pnl)
+    pd.DataFrame({"realized_pnl": pnls}).to_csv(
+        RESULTS_DIR / f"trades_{label}.csv", index=False
+    )
     engine.dispose()
     return results
 
