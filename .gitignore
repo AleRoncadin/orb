@@ -1,0 +1,22 @@
+# dati grezzi e generati (troppo grossi per git)
+*.csv
+*.parquet
+data/
+
+# output generati
+backtests/results/
+analysis/plots/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code local settings
+.claude/settings.local.json
