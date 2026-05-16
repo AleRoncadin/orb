@@ -1,0 +1,17 @@
+Comandi da eseguire domani in sequenza:
+
+  # 1. Costruisce catalog NautilusTrader + M5 parquet (lento, ~minuti/ore)
+  python src/pipeline.py
+
+  # 2. Grid optimizer IS 2015-2022 (veloce, ~minuti)
+  python backtests/optimize.py
+
+  # 3. Edita OPTIMIZE/FIXED in optimize.py con params migliori, poi:
+  #    Validazione NautilusTrader su best params
+  python backtests/run_backtest.py
+
+  # 4. Monte Carlo su trades prodotti da step 3
+  python analysis/montecarlo.py
+
+  Punto critico: step 1 (pipeline.py) è il più a rischio errori nuovi — non è mai arrivato a fine corsa. Se crasha, mandami
+  l'errore esatto.
