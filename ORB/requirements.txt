@@ -1,0 +1,8 @@
+duka
+nautilus_trader
+pandas_ta
+pandas
+numpy
+scipy
+matplotlib
+pyarrow
