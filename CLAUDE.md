@@ -19,16 +19,20 @@ Core rules (never change without explicit user instruction):
 ## Pipeline (run in order)
 
 ```bash
-# 1. Build M5 parquet from Tickstory/Dukascopy CSV
+# 1. Build M5 parquet + NautilusTrader catalog from Tickstory/Dukascopy CSV
+#    WARNING: loads full CSV into RAM before writing — needs ~6 GB free
+#    Pandas warns "Converting to PeriodArray will drop timezone" — non-blocking, ignore it
 python src/pipeline.py
 
-# 2. Run single NautilusTrader backtest (in-sample 2015–2022)
-python backtests/run_backtest.py
-
-# 3. Grid optimization (vectorized pandas, fast)
+# 2. Grid optimization on IS data (vectorized, fast — ~minutes for 5k combos)
+#    Edit OPTIMIZE dict and FIXED dict in optimize.py before running
 python backtests/optimize.py
 
-# 4. Monte Carlo robustness analysis
+# 3. NautilusTrader validation of best params (tick-level fills, realistic slippage)
+#    Edit ORBConfig in run_backtest.py __main__ with chosen params before running
+python backtests/run_backtest.py
+
+# 4. Monte Carlo robustness analysis on trades from step 3
 python analysis/montecarlo.py
 ```
 
@@ -64,14 +68,18 @@ OOS is validated only once, on the final selected parameters.
 **`backtests/optimize.py`** — MT5-style grid optimizer:
 - Edit only the `OPTIMIZE` dict: `"param": (start, step, stop)` (stop inclusive)
 - Edit `FIXED` for parameters held constant
-- Uses vectorized pandas backtest (not NautilusTrader) for speed
+- `prepare_daily_data()` pre-splits M5 into numpy dicts once (called once, not per combo) — critical for performance
+- Uses vectorized numpy entry/exit scan per day, no iterrows
 - Results → `backtests/results/optimization.csv` sorted by net_profit
+- Each result row includes `_trades` list (PnL per trade) usable directly in montecarlo.py
 - NautilusTrader used only for final validation of best params
 
 **`backtests/run_backtest.py`** — NautilusTrader single run:
 - FillModel: prob_slippage=0.4, random_seed=42
 - Starting balance: $100,000
+- Metrics from `generate_positions_report()` — `realized_pnl` is Money string `"100.50 USD"`, parsed with `parse_pnl()`
 - Outputs trades CSV to `backtests/results/trades_<label>.csv`
+- Produces genuinely different PnL from optimizer (tick-level fills vs M5 bar open approximation)
 
 **`analysis/montecarlo.py`** — Matteo Conti shuffle method:
 - 1000 permutations of trade sequence
